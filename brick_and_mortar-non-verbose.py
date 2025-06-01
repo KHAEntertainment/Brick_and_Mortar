@@ -1,6 +1,5 @@
 # alternate_tool_infill.py
-# Version 0.5 - Non-Verbose G-code Support Added
-# Adds mid-layer TPU "mortar" between PETG structural layers using Z-offset and X/Y stagger
+# Version 0.6 - Improved infill detection for sparse G-code, exaggerated offset for debug
 
 import re
 
@@ -9,7 +8,7 @@ base_tool = "T0"                # Base material (PETG, ABS, ASA)
 alt_tool = "T1"                 # Secondary material (TPU)
 layer_height = 0.2              # mm, base slicer layer height
 mortar_offset_z = layer_height / 2  # Mid-layer TPU offset (e.g., 0.1mm)
-brick_offset_xy = 0.25          # X/Y shift for TPU interlock
+brick_offset_xy = 1.0           # DEBUG: Increased X/Y shift for visibility
 
 enable_tool_settings = True
 enable_top_bottom_tool_layers = False  # Toggle for future expansion
@@ -54,8 +53,8 @@ def process_gcode(lines):
         if stripped.startswith("G1") and "E" in stripped and ("X" in stripped or "Y" in stripped):
             current_layer_lines.append(line)
 
-        # Determine if current G1 move is part of infill
-        if len(current_layer_lines) > 5:  # Enough G1 moves to infer infill
+        # Simplified trigger: every Z layer gets mortar from previous moves
+        if stripped.startswith(";LAYER_CHANGE") and current_layer_lines:
             infill_block = current_layer_lines.copy()
             current_layer_lines = []
 
@@ -129,4 +128,3 @@ if __name__ == "__main__":
         f.writelines(new_lines)
 
     print(f"Processed file saved to {output_file}")
-
