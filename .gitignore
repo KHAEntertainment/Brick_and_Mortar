@@ -1,3 +1,5 @@
 .cursorrules
 GIT_ACCOUNT_SWITCHING.md
-git-quick.sh 
+git-quick.sh
+test_output2.gcode
+toolchange-example.gcode.3mf 

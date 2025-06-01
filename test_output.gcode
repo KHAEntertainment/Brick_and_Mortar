@@ -1,5 +1,5 @@
 # alternate_tool_infill.py
-# Version 0.4 - Brick-Twist Hybrid Mode + Overextrusion Support
+# Version 0.5 - Non-Verbose G-code Support Added
 # Adds mid-layer TPU "mortar" between PETG structural layers using Z-offset and X/Y stagger
 
 import re
@@ -13,8 +13,8 @@ brick_offset_xy = 0.25          # X/Y shift for TPU interlock
 
 enable_tool_settings = True
 enable_top_bottom_tool_layers = False  # Toggle for future expansion
-# if len(sys.argv
-# New: Overextrusion for mortar layers
+
+# Overextrusion for mortar layers
 overextrude_mortar = True
 mortar_extrusion_factor = 1.05  # 5% more extrusion
 
@@ -28,44 +28,36 @@ tool_settings = {
 # === SCRIPT LOGIC ===
 def process_gcode(lines):
     processed_lines = []
-    current_layer = 0
-    current_tool = base_tool
     z_height = 0.0
+    prev_z = 0.0
     infill_block = []
-    capture_infill = False
+    current_layer_lines = []
+    in_infill_capture = False
 
     for i, line in enumerate(lines):
         stripped = line.strip()
-
-        # Detect and track base layer
-        if stripped.startswith(";LAYER:"):
-            current_layer = int(stripped.split(":")[1])
-            processed_lines.append(line)
-            continue
 
         if stripped.startswith("G1 Z"):
             z_match = re.search(r"Z([\d\.]+)", stripped)
             if z_match:
                 z_height = float(z_match.group(1))
+                # Insert mortar after previous layer
+                if prev_z > 0 and infill_block:
+                    mortar_z = prev_z + mortar_offset_z
+                    processed_lines.extend(insert_mortar_layer(infill_block, mortar_z))
+                    infill_block = []
+            prev_z = z_height
             processed_lines.append(line)
             continue
 
-        # Capture infill blocks to reuse at Z+offset
-        if stripped.startswith(";TYPE:INFILL") and current_layer > 0:
-            capture_infill = True
-            infill_block = [line]
-            processed_lines.append(line)
-            continue
+        # Accumulate current layer G1 infill-like lines
+        if stripped.startswith("G1") and "E" in stripped and ("X" in stripped or "Y" in stripped):
+            current_layer_lines.append(line)
 
-        if capture_infill:
-            if stripped.startswith(";TYPE:") or stripped.startswith(";LAYER:"):
-                capture_infill = False
-                # Insert synthetic TPU layer after this one
-                z_mortar = z_height + mortar_offset_z
-                processed_lines.extend(insert_mortar_layer(infill_block, z_mortar))
-                infill_block = []
-            else:
-                infill_block.append(line)
+        # Determine if current G1 move is part of infill
+        if len(current_layer_lines) > 5:  # Enough G1 moves to infer infill
+            infill_block = current_layer_lines.copy()
+            current_layer_lines = []
 
         processed_lines.append(line)
 
@@ -120,9 +112,6 @@ def apply_extrusion_multiplier(line, factor):
 # === ENTRY POINT ===
 if __name__ == "__main__":
     import sys
-    import os
-
-    print(f"DEBUG: sys.argv = {sys.argv}")
 
     if len(sys.argv) != 3:
         print("Usage: python alternate_tool_infill.py input.gcode output.gcode")
@@ -130,10 +119,6 @@ if __name__ == "__main__":
 
     input_file = sys.argv[1]
     output_file = sys.argv[2]
-
-    if not os.path.isfile(input_file):
-        print(f"ERROR: Input file does not exist: {input_file}")
-        sys.exit(1)
 
     with open(input_file, 'r') as f:
         lines = f.readlines()
@@ -144,3 +129,4 @@ if __name__ == "__main__":
         f.writelines(new_lines)
 
     print(f"Processed file saved to {output_file}")
+
