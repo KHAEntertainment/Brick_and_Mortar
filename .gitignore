@@ -1,5 +1,23 @@
-.cursorrules
+# Development and debug files
+debug/
+test-gcode/
+
+# Personal scripts and docs
 GIT_ACCOUNT_SWITCHING.md
 git-quick.sh
-test_output2.gcode
-toolchange-example.gcode.3mf 
+
+# Cursor IDE files
+.cursorrules
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# System files
+.DS_Store
+
+# Temporary G-code files
+*.gcode.temp
+*_debug*.gcode
+*_test*.gcode 
