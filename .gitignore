@@ -9,15 +9,40 @@ git-quick.sh
 # Cursor IDE files
 .cursorrules
 
-# Python cache files
+# Python environment and dependencies
+venv/
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+dist/
+build/
+
+# API logs and debug files
+brick-mortar-api/venv/
+brick-mortar-api/*.log
+brick-mortar-api/debug/
+brick-mortar-api/test_*.gcode
 
 # System files
 .DS_Store
+.vscode/
+*.swp
+*.swo
+*~
 
-# Temporary G-code files
+# Temporary files
+*.tmp
+*.temp
 *.gcode.temp
 *_debug*.gcode
-*_test*.gcode 
+*_test*.gcode
+
+# IDE and editor files
+.idea/
+*.sublime-*
+
+# Environment variables
+.env
+.env.local
+.env.*.local 

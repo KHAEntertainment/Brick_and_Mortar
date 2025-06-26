@@ -116,13 +116,22 @@ def apply_extrusion_multiplier(line, factor):
 # === ENTRY POINT ===
 if __name__ == "__main__":
     import sys
+    import os
 
-    if len(sys.argv) != 3:
+    # Handle BambuStudio's argument passing behavior
+    if len(sys.argv) == 4 and sys.argv[1] == '{input_file}' and sys.argv[2] == '{output_file}':
+        # BambuStudio passes literal {input_file} {output_file} then the actual file
+        input_file = sys.argv[3]
+        # Generate output filename
+        base_name = os.path.splitext(input_file)[0]
+        output_file = f"{base_name}_processed.gcode"
+    elif len(sys.argv) == 3:
+        # Normal command line usage
+        input_file = sys.argv[1]
+        output_file = sys.argv[2]
+    else:
         print("Usage: python alternate_tool_infill.py input.gcode output.gcode")
         sys.exit(1)
-
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
 
     with open(input_file, 'r') as f:
         lines = f.readlines()
