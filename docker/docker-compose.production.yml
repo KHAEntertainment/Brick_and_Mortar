@@ -1,0 +1,112 @@
+# ============================================
+# BRICK & MORTAR API - PRODUCTION DEPLOYMENT
+# ============================================
+# Following khaent-nas1 Docker Server Standards
+# 
+# CONFIGURATION REQUIRED:
+# - Set environment variables in Portainer
+# - Create basic auth secret: bm_api_auth
+# - Verify external network exists: php-dev-stack_dev-network
+# 
+# ACCESS URLS:
+# - Local: http://bm-api.nas1
+# - Internet: https://bm-api.khaent.com (with basic auth)
+# ============================================
+
+version: '3.8'
+
+services:
+  bm-api:
+    build: 
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - PORT=${PORT:-18090}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://bm-api.khaent.com,https://app.khaent.com,http://bm-api.nas1}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Supabase configuration (for future use)
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_SERVICE_ROLE_KEY_FILE=${SUPABASE_SERVICE_ROLE_KEY_FILE:-}
+    ports:
+      - "${PORT:-18090}:${PORT:-18090}"
+    volumes:
+      # Logs directory for debugging
+      - brick-mortar-logs:/app/logs
+      # Development mode: uncomment to mount source code
+      # - ${PROJECT_PATH:-/volume1/homes/docker/development/projects}/brick-mortar-api:/app
+    secrets:
+      # Future Supabase integration
+      # - supabase_service_key
+      # Basic auth for internet access
+      - source: bm_api_auth
+        target: /run/secrets/api_auth
+    deploy:
+      labels:
+        # Enable Traefik
+        - "traefik.enable=true"
+        
+        # Local access (no auth required)
+        - "traefik.http.routers.bm-api.rule=Host(`bm-api.nas1`)"
+        - "traefik.http.routers.bm-api.entrypoints=web"
+        - "traefik.http.routers.bm-api.service=bm-api"
+        
+        # Internet access (with basic auth)
+        - "traefik.http.routers.bm-api-secure.rule=Host(`bm-api.khaent.com`)"
+        - "traefik.http.routers.bm-api-secure.entrypoints=websecure"
+        - "traefik.http.routers.bm-api-secure.tls=true"
+        - "traefik.http.routers.bm-api-secure.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.bm-api-secure.service=bm-api"
+        - "traefik.http.routers.bm-api-secure.middlewares=bm-api-auth,security-headers"
+        
+        # Service configuration
+        - "traefik.http.services.bm-api.loadbalancer.server.port=${PORT:-18090}"
+        
+        # Basic auth middleware
+        - "traefik.http.middlewares.bm-api-auth.basicauth.usersfile=/run/secrets/api_auth"
+        
+        # Security headers middleware
+        - "traefik.http.middlewares.security-headers.headers.frameDeny=true"
+        - "traefik.http.middlewares.security-headers.headers.sslRedirect=true"
+        - "traefik.http.middlewares.security-headers.headers.browserXssFilter=true"
+        - "traefik.http.middlewares.security-headers.headers.contentTypeNosniff=true"
+        
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-18090}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    networks:
+      - dev-network
+
+networks:
+  dev-network:
+    external: true
+    name: php-dev-stack_dev-network
+
+volumes:
+  brick-mortar-logs:
+    driver: local
+
+secrets:
+  bm_api_auth:
+    external: true
+  # Future secrets for Supabase integration
+  # supabase_service_key:
+  #   external: true

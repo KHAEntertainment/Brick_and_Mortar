@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  brick-mortar-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${BRICK_MORTAR_PORT:-9000}:${BRICK_MORTAR_PORT:-9000}"
+    environment:
+      - ENV=development
+      - BRICK_MORTAR_PORT=${BRICK_MORTAR_PORT:-9000}
+      - PORT=${BRICK_MORTAR_PORT:-9000}  # Fallback for compatibility
+    volumes:
+      - ../:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${BRICK_MORTAR_PORT:-9000}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

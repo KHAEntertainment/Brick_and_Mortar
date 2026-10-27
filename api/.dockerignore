@@ -1,0 +1,42 @@
+# Ignore files that shouldn't be in the Docker image
+
+# Docker files themselves
+docker/
+Dockerfile
+docker-compose*.yml
+
+# Development files
+.env
+.env.*
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Test files (keep them for now in case they're useful)
+# test_*.py
+
+# Logs
+*.log
+logs/

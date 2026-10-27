@@ -46,3 +46,5 @@ brick-mortar-api/test_*.gcode
 .env
 .env.local
 .env.*.local 
+# Logs
+*.log
