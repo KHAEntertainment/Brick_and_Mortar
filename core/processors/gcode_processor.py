@@ -21,9 +21,22 @@ from ..utils.gcode_parser import GCodeParser
 class GCodeProcessor:
     """Unified G-code processor for brick & mortar modifications"""
     
+    # Features never copied into mortar layers (Bambu/Orca "Prime tower", Prusa "Wipe tower")
+    EXCLUDED_FEATURES = {"prime tower", "wipe tower"}
+    
     def __init__(self):
         self.slicer_detector = SlicerDetector()
         self.parser = GCodeParser()
+    
+    def _should_capture(self, line: str, in_prime_tower: bool) -> bool:
+        """Decide whether a line belongs in the layer's mortar copy"""
+        if not self.parser.is_motion_line(line):
+            return False
+        if not in_prime_tower:
+            return True
+        # Inside the prime tower keep only travels, so the path to the next feature stays correct
+        coords = self.parser.extract_coordinates(line)
+        return 'E' not in coords and any(axis in coords for axis in ('X', 'Y', 'Z'))
     
     def process(self, lines: List[str], params: ProcessingParams, job_id: Optional[str] = None) -> ProcessingResponse:
         """
@@ -43,6 +56,10 @@ class GCodeProcessor:
             # Validate input
             if not lines:
                 return ProcessingResponse.create_error("Empty G-code input", job_id)
+            
+            # Normalize line endings: readlines() keeps "\n" but generated lines don't,
+            # and every writer joins with "\n"
+            lines = [line.rstrip('\r\n') for line in lines]
             
             # Detect slicer format
             slicer_format = self.slicer_detector.detect_format(lines)
@@ -89,6 +106,9 @@ class GCodeProcessor:
         current_layer_lines = []
         layers_processed = 0
         mortar_layers_added = 0
+        seen_first_layer = False  # Don't capture start G-code moves
+        in_prime_tower = False    # Prime/wipe tower isn't part of the brick
+        self._mortar_retracted = 0.0  # Mortar tool's retraction, carried across mortar layers
         
         # Auto-detect layer height if not provided
         if params.layer_height is None:
@@ -104,6 +124,10 @@ class GCodeProcessor:
         
         for i, line in enumerate(lines):
             stripped = line.strip()
+            
+            feature = self.parser.get_feature(stripped)
+            if feature is not None:
+                in_prime_tower = feature.lower() in self.EXCLUDED_FEATURES
             
             # Handle Z moves - critical for layer detection
             if self.parser.is_z_move(stripped):
@@ -127,22 +151,28 @@ class GCodeProcessor:
                     
                     prev_z = z_height
                 
+                # Keep Z moves (layer Z, Z-hop travels) so the mortar copy can replay them
+                if seen_first_layer and self._should_capture(stripped, in_prime_tower):
+                    current_layer_lines.append(line)
+                
                 processed_lines.append(line)
                 continue
             
-            # Accumulate current layer extrusion moves
-            if self.parser.is_extrusion_move(stripped):
+            # Accumulate every motion line in the layer: travels, feedrate changes,
+            # retracts and deretracts, not just extrusions
+            if seen_first_layer and self._should_capture(stripped, in_prime_tower):
                 current_layer_lines.append(line)
             
             # Detect layer changes based on slicer format
             if self.slicer_detector.detect_layer_change(stripped, slicer_format):
-                if current_layer_lines:
+                seen_first_layer = True
+                if any(self.parser.is_extrusion_move(l) for l in current_layer_lines):
                     infill_block = current_layer_lines.copy()
-                    current_layer_lines = []
                     layers_processed += 1
                     
                     if params.debug_mode:
                         print(f"Layer {layers_processed} processed, {len(infill_block)} moves captured")
+                current_layer_lines = []
             
             processed_lines.append(line)
         
@@ -186,23 +216,48 @@ class GCodeProcessor:
         else:
             lines.append(f"{params.alt_tool} ;TOOL_CHANGE:1 ; Switch to mortar material")
         
-        # Process infill moves with brick offset and extrusion multiplier
+        # Replay the layer's moves with brick offset and extrusion multiplier.
+        # Travels, retracts and deretracts are kept so the path and E balance match the source.
         for line in infill_lines:
-            if self.parser.is_movement_command(line) and ('X' in line or 'Y' in line):
-                # Apply brick pattern offset
-                modified_line = self.parser.apply_coordinate_offset(
-                    line, params.xy_shift, params.xy_shift, 0
-                )
-                
-                # Apply extrusion multiplier if this is an extrusion move
-                if 'E' in modified_line:
-                    modified_line = self.parser.apply_extrusion_multiplier(
-                        modified_line, params.extrusion_multiplier
-                    )
-                
-                lines.append(modified_line)
-            else:
+            if not self.parser.is_motion_line(line):
                 lines.append(line)
+                continue
+            
+            coords = self.parser.extract_coordinates(line)
+            has_xy = 'X' in coords or 'Y' in coords
+            e_value = coords.get('E')
+            
+            # Keep the mortar tool's retraction balanced. Skipped prime-tower moves and
+            # mortar layer boundaries can split a retract from its deretract.
+            if e_value is not None and e_value < 0:
+                self._mortar_retracted += -e_value
+            elif e_value is not None and e_value > 0 and not has_xy:
+                # Deretract: restore at most what's actually retracted
+                restore = min(e_value, self._mortar_retracted)
+                self._mortar_retracted -= restore
+                if restore <= 1e-6:
+                    continue
+                line = re.sub(r'E[\d\.-]+', f'E{restore:.5f}', line)
+            elif e_value is not None and e_value > 0 and self._mortar_retracted > 1e-6:
+                # Extrusion while retracted: deretract first
+                lines.append(f"G1 E{self._mortar_retracted:.5f} F1800 ; mortar deretract")
+                self._mortar_retracted = 0.0
+            
+            # Apply brick pattern offset; lift layer Z and Z-hops to the mortar height
+            modified_line = self.parser.apply_coordinate_offset(
+                line,
+                params.xy_shift if has_xy else 0,
+                params.xy_shift if has_xy else 0,
+                params.z_offset if 'Z' in coords else 0
+            )
+            
+            # Multiply only real extrusion; retracts and wipes (negative E) stay as-is
+            if has_xy and e_value is not None and e_value > 0:
+                modified_line = self.parser.apply_extrusion_multiplier(
+                    modified_line, params.extrusion_multiplier
+                )
+            
+            lines.append(modified_line)
         
         # Tool change back to base material
         if params.enable_tool_settings:
@@ -294,10 +349,10 @@ class GCodeProcessor:
         if not has_movements:
             errors.append("No movement commands found in G-code")
         
-        # Check for layer changes
-        layer_changes = sum(1 for line in lines[:500] 
-                           if self.slicer_detector.detect_layer_change(line, slicer_format))
-        if layer_changes == 0:
+        # Check for layer changes (whole file: Bambu start G-code runs ~900+ lines before layer 1)
+        has_layer_change = any(self.slicer_detector.detect_layer_change(line, slicer_format)
+                               for line in lines)
+        if not has_layer_change:
             errors.append("No layer changes detected - may not be a valid sliced file")
         
         return len(errors) == 0, errors

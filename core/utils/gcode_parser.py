@@ -40,6 +40,19 @@ class GCodeParser:
         )
     
     @staticmethod
+    def is_motion_line(line: str) -> bool:
+        """Check if line is any G0-G3 command (travel, extrusion, arc, retract or feedrate-only)"""
+        command = line.split(';')[0].strip()
+        command = re.sub(r'^N\d+\s+', '', command)  # Strip line number (BambuStudio)
+        return re.match(r'G[0-3](\s|$)', command) is not None
+    
+    @staticmethod
+    def get_feature(line: str) -> Optional[str]:
+        """Return the feature name from a '; FEATURE: x' (Bambu/Orca) or ';TYPE:x' (Prusa) comment"""
+        match = re.match(r'^(?:N\d+\s+)?;\s*(?:FEATURE|TYPE):\s*(.+)$', line.strip())
+        return match.group(1).strip() if match else None
+    
+    @staticmethod
     def is_extrusion_move(line: str) -> bool:
         """Check if line is an extrusion move (G1 with E and X/Y)"""
         if not GCodeParser.is_movement_command(line):
@@ -62,7 +75,7 @@ class GCodeParser:
     @staticmethod
     def apply_coordinate_offset(line: str, x_offset: float = 0, y_offset: float = 0, z_offset: float = 0) -> str:
         """Apply coordinate offsets to G-code line"""
-        if not GCodeParser.is_movement_command(line):
+        if not GCodeParser.is_motion_line(line):
             return line
         
         result = line
@@ -96,7 +109,7 @@ class GCodeParser:
     @staticmethod
     def apply_extrusion_multiplier(line: str, multiplier: float) -> str:
         """Apply extrusion multiplier to E values"""
-        if not GCodeParser.is_movement_command(line) or multiplier == 1.0:
+        if not GCodeParser.is_motion_line(line) or multiplier == 1.0:
             return line
         
         e_match = re.search(r'E([\d\.-]+)', line)

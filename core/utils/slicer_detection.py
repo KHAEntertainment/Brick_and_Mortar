@@ -54,8 +54,10 @@ class SlicerDetector:
         pattern, is_regex = SlicerDetector.get_layer_change_pattern(slicer_format)
         
         if slicer_format in [SlicerFormat.BAMBU, SlicerFormat.ORCA]:
-            # Special handling for Bambu/Orca: needs both pattern and "notify layer change"
-            return pattern in line and "notify layer change" in line
+            # Special handling for Bambu/Orca: needs both pattern and "notify layer change".
+            # The pattern must be in the command, not a comment: the config dump at the top
+            # of the file has a "; layer_change_gcode = ... M991 S0 P..." comment line.
+            return pattern in line.split(';')[0] and "notify layer change" in line
         elif is_regex:
             return bool(re.search(pattern, line))
         else:
