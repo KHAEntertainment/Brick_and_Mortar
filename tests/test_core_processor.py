@@ -115,7 +115,7 @@ def test_with_real_file():
     """Test with a real G-code file if available"""
     print("\nTesting with real G-code file...")
     
-    test_file = "backups/original-versions/test_examples/Cube_PETG_48m53s.gcode"
+    test_file = "backups/original-versions/test_examples/Cube_PCTG_48m53s.gcode"
     
     if os.path.exists(test_file):
         print(f"   Using test file: {test_file}")
@@ -138,14 +138,14 @@ def test_with_real_file():
         print(f"   Estimated layers: {info['estimated_layers']}")
         print(f"   Layer height: {info['estimated_layer_height']}mm")
         
-        # Test processing (just validation, not full processing due to size)
-        if len(lines) < 10000:  # Only process smaller files fully
-            response = processor.process(lines, params)
-            if response.success:
-                print(f"   ✅ Processing successful")
-                print(f"   Mortar layers added: {response.processing_stats.mortar_layers_added}")
-            else:
-                print(f"   ❌ Processing failed: {response.error}")
+        # Test full processing
+        response = processor.process(lines, params)
+        if response.success:
+            print(f"   ✅ Processing successful")
+            print(f"   Mortar layers added: {response.processing_stats.mortar_layers_added}")
+            print(f"   Processing time: {response.processing_stats.processing_time_ms:.1f}ms")
+        else:
+            print(f"   ❌ Processing failed: {response.error}")
     else:
         print(f"   Test file not found: {test_file}")
         print("   ⚠️  Skipping real file test")

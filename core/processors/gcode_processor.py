@@ -112,7 +112,7 @@ class GCodeProcessor:
         
         # Auto-detect layer height if not provided
         if params.layer_height is None:
-            detected_height = self.slicer_detector.estimate_layer_height(lines)
+            detected_height = self.slicer_detector.estimate_layer_height(lines, slicer_format)
             layer_height = detected_height or (params.z_offset * 2)
         else:
             layer_height = params.layer_height
@@ -361,7 +361,7 @@ class GCodeProcessor:
         """Get information about G-code file"""
         slicer_format = self.slicer_detector.detect_format(lines)
         compatibility = self.slicer_detector.get_compatibility_info(slicer_format)
-        estimated_height = self.slicer_detector.estimate_layer_height(lines)
+        estimated_height = self.slicer_detector.estimate_layer_height(lines, slicer_format)
         
         # Count different types of commands
         movement_lines = sum(1 for line in lines if self.parser.is_movement_command(line))

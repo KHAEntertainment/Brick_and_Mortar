@@ -64,18 +64,44 @@ class SlicerDetector:
             return pattern in line
     
     @staticmethod
-    def estimate_layer_height(lines: List[str]) -> Optional[float]:
-        """Estimate layer height from G-code"""
+    def estimate_layer_height(lines: List[str], slicer_format: Optional[SlicerFormat] = None) -> Optional[float]:
+        """Estimate layer height from G-code
+
+        Starts at the first real layer marker, so start G-code (which runs ~900+
+        lines on BambuStudio H2D files) doesn't hide the layers. Each layer's Z is
+        the first Z move after its marker, which skips Z-hops inside the layer.
+        """
+        if slicer_format is None:
+            slicer_format = SlicerDetector.detect_format(lines)
+
         z_values = []
-        
-        for line in lines[:500]:  # Check first 500 lines
-            if "G1 Z" in line:
-                z_match = re.search(r"Z([\d\.]+)", line)
-                if z_match:
-                    z_val = float(z_match.group(1))
-                    if z_val > 0:  # Ignore Z0
-                        z_values.append(z_val)
-        
+        awaiting_layer_z = False
+
+        for line in lines:
+            if SlicerDetector.detect_layer_change(line, slicer_format):
+                awaiting_layer_z = True
+                continue
+            if not awaiting_layer_z:
+                continue
+            z_match = re.match(r'^(?:N\d+\s+)?G[01]\s+Z(-?[\d\.]+)', line.strip())
+            if z_match:
+                awaiting_layer_z = False
+                z_val = float(z_match.group(1))
+                if z_val > 0 and (not z_values or z_val != z_values[-1]):
+                    z_values.append(z_val)
+                if len(z_values) >= 10:
+                    break
+
+        if not z_values:
+            # No layer markers found: fall back to Z moves near the top of the file
+            for line in lines[:500]:
+                if "G1 Z" in line:
+                    z_match = re.search(r"Z([\d\.]+)", line)
+                    if z_match:
+                        z_val = float(z_match.group(1))
+                        if z_val > 0:  # Ignore Z0
+                            z_values.append(z_val)
+
         if len(z_values) >= 2:
             # Look for consistent differences
             differences = []
@@ -85,8 +111,9 @@ class SlicerDetector:
                     differences.append(diff)
             
             if differences:
-                # Return most common difference
-                return round(sum(differences) / len(differences), 2)
+                # Return most common difference (a taller first layer shouldn't skew it)
+                rounded = [round(diff, 2) for diff in differences]
+                return max(set(rounded), key=rounded.count)
         
         return None  # Could not determine
     
