@@ -17,6 +17,7 @@ from ..models.processing_response import (
 )
 from ..utils.slicer_detection import SlicerDetector, SlicerFormat
 from ..utils.gcode_parser import GCodeParser
+from ..utils.tool_change import ToolChangeLibrary
 
 class GCodeProcessor:
     """Unified G-code processor for brick & mortar modifications"""
@@ -108,7 +109,15 @@ class GCodeProcessor:
         mortar_layers_added = 0
         seen_first_layer = False  # Don't capture start G-code moves
         in_prime_tower = False    # Prime/wipe tower isn't part of the brick
+        in_tool_change = False    # Slicer's own tool-change section isn't either
+        active_tool = params.base_tool  # Tool the original print is on
+        last_x = last_y = None    # Where the original print's nozzle is
         self._mortar_retracted = 0.0  # Mortar tool's retraction, carried across mortar layers
+        self.tool_changes = ToolChangeLibrary.from_gcode(lines, slicer_format)
+        
+        if params.debug_mode:
+            found = sorted(self.tool_changes.templates) or "none"
+            print(f"Slicer tool-change sequences found for: {found}")
         
         # Auto-detect layer height if not provided
         if params.layer_height is None:
@@ -128,6 +137,14 @@ class GCodeProcessor:
             feature = self.parser.get_feature(stripped)
             if feature is not None:
                 in_prime_tower = feature.lower() in self.EXCLUDED_FEATURES
+            if 'CP TOOLCHANGE START' in stripped:
+                in_tool_change = True
+            elif 'CP TOOLCHANGE END' in stripped:
+                in_tool_change = False
+            
+            tool = self.parser.get_tool_change(stripped)
+            if tool is not None:
+                active_tool = tool
             
             # Handle Z moves - critical for layer detection
             if self.parser.is_z_move(stripped):
@@ -139,7 +156,8 @@ class GCodeProcessor:
                     if prev_z > 0 and infill_block:
                         mortar_z = prev_z + params.z_offset
                         mortar_lines = self._create_mortar_layer(
-                            infill_block, mortar_z, params, mortar_layers_added + 1
+                            infill_block, mortar_z, params, mortar_layers_added + 1,
+                            active_tool, (last_x, last_y)
                         )
                         processed_lines.extend(mortar_lines)
                         mortar_layers_added += 1
@@ -152,16 +170,18 @@ class GCodeProcessor:
                     prev_z = z_height
                 
                 # Keep Z moves (layer Z, Z-hop travels) so the mortar copy can replay them
-                if seen_first_layer and self._should_capture(stripped, in_prime_tower):
+                if seen_first_layer and not in_tool_change and self._should_capture(stripped, in_prime_tower):
                     current_layer_lines.append(line)
                 
+                last_x, last_y = self._track_xy(stripped, last_x, last_y)
                 processed_lines.append(line)
                 continue
             
             # Accumulate every motion line in the layer: travels, feedrate changes,
             # retracts and deretracts, not just extrusions
-            if seen_first_layer and self._should_capture(stripped, in_prime_tower):
+            if seen_first_layer and not in_tool_change and self._should_capture(stripped, in_prime_tower):
                 current_layer_lines.append(line)
+            last_x, last_y = self._track_xy(stripped, last_x, last_y)
             
             # Detect layer changes based on slicer format
             if self.slicer_detector.detect_layer_change(stripped, slicer_format):
@@ -180,7 +200,8 @@ class GCodeProcessor:
         if prev_z > 0 and infill_block:
             mortar_z = prev_z + params.z_offset
             mortar_lines = self._create_mortar_layer(
-                infill_block, mortar_z, params, mortar_layers_added + 1
+                infill_block, mortar_z, params, mortar_layers_added + 1,
+                active_tool, (last_x, last_y)
             )
             processed_lines.extend(mortar_lines)
             mortar_layers_added += 1
@@ -197,24 +218,51 @@ class GCodeProcessor:
         
         return processed_lines, stats
     
-    def _create_mortar_layer(self, infill_lines: List[str], z_mortar: float, params: ProcessingParams, layer_number: int) -> List[str]:
-        """Create mortar layer with TPU material"""
+    def _track_xy(self, line: str, last_x: Optional[float], last_y: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+        """Follow the original print's nozzle position"""
+        if self.parser.is_motion_line(line):
+            coords = self.parser.extract_coordinates(line)
+            last_x = coords.get('X', last_x)
+            last_y = coords.get('Y', last_y)
+        return last_x, last_y
+    
+    def _tool_change_lines(self, tool: str, z: float, params: ProcessingParams, label: str) -> List[str]:
+        """Switch to `tool`, using the slicer's own sequence (e.g. H2D M620/M621) when the file has one"""
         lines = []
+        if params.enable_tool_settings and tool == params.alt_tool:
+            # Preheat during the swap; the idle nozzle may have been cooled or turned off by the slicer
+            heater = self.tool_changes.heater_index(tool)
+            lines.append(f"M104 T{heater} S{params.mortar_temp} ; preheat mortar nozzle")
+        
+        if self.tool_changes.has(tool):
+            lines.append(f";TOOL_CHANGE_START {tool} ; {label} (slicer sequence)")
+            lines.extend(self.tool_changes.render(tool, z))
+            lines.append(f";TOOL_CHANGE_END {tool}")
+        else:
+            lines.append(f"{tool} ;TOOL_CHANGE ; {label} (no slicer tool-change sequence in file)")
+        return lines
+    
+    def _create_mortar_layer(self, infill_lines: List[str], z_mortar: float, params: ProcessingParams, layer_number: int,
+                             active_tool: Optional[str] = None,
+                             resume_xy: Tuple[Optional[float], Optional[float]] = (None, None)) -> List[str]:
+        """Create mortar layer with TPU material
+        
+        `active_tool` is the tool the original print is on when the mortar layer is inserted;
+        the print is switched back to it afterwards and returned to `resume_xy`.
+        """
+        lines = []
+        active_tool = active_tool or params.base_tool
+        switch_tools = active_tool != params.alt_tool
         
         # Layer header
         lines.extend(self.parser.create_mortar_layer_header(z_mortar, layer_number))
         
         # Tool change to mortar material
+        if switch_tools:
+            lines.extend(self._tool_change_lines(params.alt_tool, z_mortar, params, "Switch to mortar material"))
         if params.enable_tool_settings:
-            tool_change_lines = self.parser.create_tool_change_sequence(
-                params.alt_tool, 
-                params.mortar_temp, 
-                params.mortar_fan_speed,
-                "TOOL_CHANGE:1 ; Switch to mortar material"
-            )
-            lines.extend(tool_change_lines)
-        else:
-            lines.append(f"{params.alt_tool} ;TOOL_CHANGE:1 ; Switch to mortar material")
+            lines.append(f"M109 S{params.mortar_temp} ; wait for mortar nozzle temperature")
+            lines.append(f"M106 S{params.mortar_fan_speed}")
         
         # Replay the layer's moves with brick offset and extrusion multiplier.
         # Travels, retracts and deretracts are kept so the path and E balance match the source.
@@ -259,12 +307,23 @@ class GCodeProcessor:
             
             lines.append(modified_line)
         
-        # Tool change back to base material
-        if params.enable_tool_settings:
-            lines.append(f"{params.base_tool} ;TOOL_CHANGE:0 ; Revert to base tool")
-        else:
-            lines.append(f"{params.base_tool} ;TOOL_CHANGE:0 ; Revert to base tool")
+        # Tool change back to whatever the original print was on
+        if switch_tools:
+            lines.extend(self._tool_change_lines(active_tool, z_mortar, params, "Revert to base tool"))
+            if not self.tool_changes.has(active_tool):
+                lines.append(f"G1 Z{z_mortar + 0.4:.3f} F600 ; lift before returning")
+        elif params.enable_tool_settings:
+            # Mortar tool was already printing: give it back the slicer's temperature
+            slicer_temp = self.tool_changes.nozzle_temp(params.alt_tool)
+            if slicer_temp is not None:
+                lines.append(f"M109 S{slicer_temp} ; restore slicer temperature")
         
+        # Return to where the original print left off before it continues
+        resume_x, resume_y = resume_xy
+        if switch_tools and resume_x is not None and resume_y is not None:
+            lines.append(f"G1 X{resume_x:.3f} Y{resume_y:.3f} F30000 ; return to base layer path")
+        
+        lines.append(f";BRICK_MORTAR_LAYER_END {layer_number}")
         return lines
     
     def _generate_preview_data(self, lines: List[str], slicer_format: SlicerFormat) -> PreviewData:

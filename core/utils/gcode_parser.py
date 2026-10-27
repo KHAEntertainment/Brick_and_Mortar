@@ -47,6 +47,14 @@ class GCodeParser:
         return re.match(r'G[0-3](\s|$)', command) is not None
     
     @staticmethod
+    def get_tool_change(line: str) -> Optional[str]:
+        """Return "T<n>" for a filament tool change; ignores Bambu's T1000/T65535 utility commands"""
+        command = line.split(';')[0].strip()
+        command = re.sub(r'^N\d+\s+', '', command)
+        match = re.match(r'^T(\d{1,2})$', command)
+        return f"T{match.group(1)}" if match else None
+    
+    @staticmethod
     def get_feature(line: str) -> Optional[str]:
         """Return the feature name from a '; FEATURE: x' (Bambu/Orca) or ';TYPE:x' (Prusa) comment"""
         match = re.match(r'^(?:N\d+\s+)?;\s*(?:FEATURE|TYPE):\s*(.+)$', line.strip())
