@@ -112,6 +112,8 @@ class GCodeProcessor:
         in_tool_change = False    # Slicer's own tool-change section isn't either
         active_tool = params.base_tool  # Tool the original print is on
         last_x = last_y = None    # Where the original print's nozzle is
+        layer_extrusion_zs = []   # Z of each extrusion in the current layer
+        block_print_z = None      # Print height of the captured layer (Z-hops excluded)
         self._mortar_retracted = 0.0  # Mortar tool's retraction, carried across mortar layers
         self.tool_changes = ToolChangeLibrary.from_gcode(lines, slicer_format)
         
@@ -154,7 +156,7 @@ class GCodeProcessor:
                     
                     # Insert mortar after previous layer if we have infill
                     if prev_z > 0 and infill_block:
-                        mortar_z = prev_z + params.z_offset
+                        mortar_z = (block_print_z if block_print_z is not None else prev_z) + params.z_offset
                         mortar_lines = self._create_mortar_layer(
                             infill_block, mortar_z, params, mortar_layers_added + 1,
                             active_tool, (last_x, last_y)
@@ -181,6 +183,8 @@ class GCodeProcessor:
             # retracts and deretracts, not just extrusions
             if seen_first_layer and not in_tool_change and self._should_capture(stripped, in_prime_tower):
                 current_layer_lines.append(line)
+                if not in_prime_tower and self.parser.is_extrusion_move(stripped):
+                    layer_extrusion_zs.append(round(z_height, 3))
             last_x, last_y = self._track_xy(stripped, last_x, last_y)
             
             # Detect layer changes based on slicer format
@@ -188,17 +192,21 @@ class GCodeProcessor:
                 seen_first_layer = True
                 if any(self.parser.is_extrusion_move(l) for l in current_layer_lines):
                     infill_block = current_layer_lines.copy()
+                    # The layer's print height is where it extrudes; the last Z seen can be a Z-lift
+                    block_print_z = (max(set(layer_extrusion_zs), key=layer_extrusion_zs.count)
+                                     if layer_extrusion_zs else None)
                     layers_processed += 1
                     
                     if params.debug_mode:
                         print(f"Layer {layers_processed} processed, {len(infill_block)} moves captured")
                 current_layer_lines = []
+                layer_extrusion_zs = []
             
             processed_lines.append(line)
         
         # Handle final layer if needed
         if prev_z > 0 and infill_block:
-            mortar_z = prev_z + params.z_offset
+            mortar_z = (block_print_z if block_print_z is not None else prev_z) + params.z_offset
             mortar_lines = self._create_mortar_layer(
                 infill_block, mortar_z, params, mortar_layers_added + 1,
                 active_tool, (last_x, last_y)

@@ -56,7 +56,8 @@ class ToolChangeLibrary:
                 if z_match:
                     layer_z = min(layer_z, float(z_match.group(1)))
             
-            change = re.match(r'M620 S(\d+)A$', command)
+            # BambuStudio writes "M620 S1A"; OrcaSlicer 2.5 adds an H argument: "M620 S1A H-1"
+            change = re.match(r'M620 S(\d+)A(?:\s|$)', command)
             if not change:
                 continue
             tool = f"T{change.group(1)}"
@@ -75,7 +76,7 @@ class ToolChangeLibrary:
             # End at M621 S<n>A, extended to the closing "gcode_claim_action : 0" if present
             end = None
             for j in range(i + 1, min(len(lines), i + 3 * cls.SEARCH_WINDOW)):
-                if cls._command(lines[j]) == f"M621 S{change.group(1)}A":
+                if re.match(rf'M621 S{change.group(1)}A(?:\s|$)', cls._command(lines[j])):
                     end = j
                     break
             if end is None:

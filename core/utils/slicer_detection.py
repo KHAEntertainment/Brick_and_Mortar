@@ -43,8 +43,10 @@ class SlicerDetector:
         patterns = {
             SlicerFormat.BAMBU: ("M991 S0 P", False),  # Contains check + "notify layer change"
             SlicerFormat.ORCA: ("M991 S0 P", False),   # Same as Bambu
-            SlicerFormat.PRUSA: (r";LAYER(?:_CHANGE)?:", True),  # Regex for both variants
-            SlicerFormat.UNKNOWN: (r";LAYER(?:_CHANGE)?:", True)  # Default to Prusa pattern
+            # PrusaSlicer writes ";LAYER_CHANGE" (no colon); Cura-style files write ";LAYER:<n>".
+            # Anchored, so ";BEFORE_LAYER_CHANGE" / ";AFTER_LAYER_CHANGE" don't count.
+            SlicerFormat.PRUSA: (r"^(?:N\d+\s+)?;(?:LAYER_CHANGE\b|LAYER:)", True),
+            SlicerFormat.UNKNOWN: (r"^(?:N\d+\s+)?;(?:LAYER_CHANGE\b|LAYER:)", True)  # Default to Prusa pattern
         }
         return patterns.get(slicer_format, patterns[SlicerFormat.UNKNOWN])
     
@@ -59,24 +61,24 @@ class SlicerDetector:
             # of the file has a "; layer_change_gcode = ... M991 S0 P..." comment line.
             return pattern in line.split(';')[0] and "notify layer change" in line
         elif is_regex:
-            return bool(re.search(pattern, line))
+            return bool(re.search(pattern, line.strip()))
         else:
             return pattern in line
     
     @staticmethod
     def estimate_layer_height(lines: List[str], slicer_format: Optional[SlicerFormat] = None) -> Optional[float]:
         """Estimate layer height from G-code
-
+        
         Starts at the first real layer marker, so start G-code (which runs ~900+
         lines on BambuStudio H2D files) doesn't hide the layers. Each layer's Z is
         the first Z move after its marker, which skips Z-hops inside the layer.
         """
         if slicer_format is None:
             slicer_format = SlicerDetector.detect_format(lines)
-
+        
         z_values = []
         awaiting_layer_z = False
-
+        
         for line in lines:
             if SlicerDetector.detect_layer_change(line, slicer_format):
                 awaiting_layer_z = True
@@ -91,7 +93,7 @@ class SlicerDetector:
                     z_values.append(z_val)
                 if len(z_values) >= 10:
                     break
-
+        
         if not z_values:
             # No layer markers found: fall back to Z moves near the top of the file
             for line in lines[:500]:
@@ -101,7 +103,7 @@ class SlicerDetector:
                         z_val = float(z_match.group(1))
                         if z_val > 0:  # Ignore Z0
                             z_values.append(z_val)
-
+        
         if len(z_values) >= 2:
             # Look for consistent differences
             differences = []

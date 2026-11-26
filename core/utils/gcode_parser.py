@@ -48,10 +48,13 @@ class GCodeParser:
     
     @staticmethod
     def get_tool_change(line: str) -> Optional[str]:
-        """Return "T<n>" for a filament tool change; ignores Bambu's T1000/T65535 utility commands"""
+        """Return "T<n>" for a filament tool change; ignores Bambu's T1000/T65535 utility commands
+        
+        Accepts trailing arguments, e.g. OrcaSlicer 2.5's "T1 H-1".
+        """
         command = line.split(';')[0].strip()
         command = re.sub(r'^N\d+\s+', '', command)
-        match = re.match(r'^T(\d{1,2})$', command)
+        match = re.match(r'^T(\d{1,2})(?:\s|$)', command)
         return f"T{match.group(1)}" if match else None
     
     @staticmethod
