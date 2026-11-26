@@ -53,8 +53,9 @@ Examples:
                        help="Z offset for mortar layers in mm (default: 0.1)")
     parser.add_argument("--xy-shift", type=float, default=0.2,
                        help="X/Y shift for brick pattern in mm (default: 0.2)")
-    parser.add_argument("--mortar-temp", type=int, default=225,
-                       help="Mortar (T1) temperature in °C (default: 225)")
+    parser.add_argument("--mortar-temp", type=int, default=None,
+                       help="Mortar (T1) temperature in °C (default: T1's nozzle temperature "
+                            "from the slicer file, else 225)")
     parser.add_argument("--mortar-speed", type=int, default=100,
                        help="Mortar speed percentage (default: 100)")
     parser.add_argument("--extrusion-multiplier", type=float, default=1.05,
@@ -147,7 +148,9 @@ def main():
     # Override with command line arguments
     params.z_offset = args.z_offset
     params.xy_shift = args.xy_shift
-    params.mortar_temp = args.mortar_temp
+    if args.mortar_temp is not None:
+        params.mortar_temp = args.mortar_temp
+        params.use_slicer_temp = False
     params.mortar_speed = args.mortar_speed
     params.extrusion_multiplier = args.extrusion_multiplier
     params.enable_preview = not args.no_preview
@@ -156,7 +159,10 @@ def main():
     print(f"⚙️  Processing parameters:")
     print(f"   - Z offset: {params.z_offset}mm")
     print(f"   - XY shift: {params.xy_shift}mm") 
-    print(f"   - Mortar temp: {params.mortar_temp}°C")
+    if params.use_slicer_temp:
+        print(f"   - Mortar temp: from slicer file (fallback {params.mortar_temp}°C)")
+    else:
+        print(f"   - Mortar temp: {params.mortar_temp}°C")
     print(f"   - Extrusion multiplier: {params.extrusion_multiplier}x")
     
     # Process G-code
@@ -173,6 +179,7 @@ def main():
     print(f"   - Original layers: {stats.original_layers}")
     print(f"   - Mortar layers added: {stats.mortar_layers_added}")
     print(f"   - Total tool changes: {stats.total_tool_changes}")
+    print(f"   - Mortar temp: {stats.mortar_temp}°C (from {stats.mortar_temp_source})")
     print(f"   - Processing time: {stats.processing_time_ms:.1f}ms")
     print(f"   - Lines: {stats.original_lines} → {stats.processed_lines} (+{stats.processed_lines - stats.original_lines})")
     

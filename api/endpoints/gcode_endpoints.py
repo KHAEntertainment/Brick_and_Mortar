@@ -62,7 +62,7 @@ async def process_gcode(
     material_preset: str = "PETG_TPU",
     z_offset: float = 0.1,
     xy_shift: float = 0.2,
-    mortar_temp: int = 225,
+    mortar_temp: Optional[int] = None,
     mortar_speed: int = 100,
     extrusion_multiplier: float = 1.05,
     enable_preview: bool = True
@@ -78,7 +78,9 @@ async def process_gcode(
             material_preset=material_preset,
             z_offset=z_offset,
             xy_shift=xy_shift,
-            mortar_temp=mortar_temp,
+            # No mortar_temp in the request: use the mortar filament's slicer temperature
+            mortar_temp=mortar_temp if mortar_temp is not None else 225,
+            use_slicer_temp=mortar_temp is None,
             mortar_speed=mortar_speed,
             extrusion_multiplier=extrusion_multiplier,
             enable_preview=enable_preview

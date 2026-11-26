@@ -22,7 +22,8 @@ class ProcessingParams:
     layer_height: Optional[float] = None  # Auto-detected if None
     
     # Tool settings
-    mortar_temp: int = 225         # T1 nozzle temperature (°C)
+    mortar_temp: int = 225         # T1 nozzle temperature (°C); fallback when use_slicer_temp finds none
+    use_slicer_temp: bool = True   # Use the mortar filament's nozzle_temperature from the slicer file
     mortar_speed: int = 100        # T1 speed percentage
     mortar_fan_speed: int = 128    # T1 fan speed (0-255)
     
@@ -88,6 +89,7 @@ class ProcessingParams:
             "xy_shift": self.xy_shift,
             "layer_height": self.layer_height,
             "mortar_temp": self.mortar_temp,
+            "use_slicer_temp": self.use_slicer_temp,
             "mortar_speed": self.mortar_speed,
             "mortar_fan_speed": self.mortar_fan_speed,
             "extrusion_multiplier": self.extrusion_multiplier,

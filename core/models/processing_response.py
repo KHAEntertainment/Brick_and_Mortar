@@ -17,6 +17,8 @@ class ProcessingStats:
     original_lines: int
     processed_lines: int
     processing_time_ms: Optional[float] = None
+    mortar_temp: Optional[int] = None         # Temperature the mortar layers were printed at
+    mortar_temp_source: Optional[str] = None  # "slicer" or "params"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -26,7 +28,9 @@ class ProcessingStats:
             "slicer_format": self.slicer_format,
             "original_lines": self.original_lines,
             "processed_lines": self.processed_lines,
-            "processing_time_ms": self.processing_time_ms
+            "processing_time_ms": self.processing_time_ms,
+            "mortar_temp": self.mortar_temp,
+            "mortar_temp_source": self.mortar_temp_source
         }
 
 @dataclass 
